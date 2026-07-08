@@ -44,10 +44,11 @@ DASHA_ORDER = ["Ketu", "Venus", "Sun", "Moon", "Mars", "Rahu", "Jupiter", "Satur
 
 
 def get_julian_day(date_str: str, time_str: str, tz_offset: float) -> float:
-    dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+    fmt = "%Y-%m-%d %H:%M:%S" if time_str.count(":") == 2 else "%Y-%m-%d %H:%M"
+    dt = datetime.strptime(f"{date_str} {time_str}", fmt)
     utc_dt = dt - timedelta(hours=tz_offset)
     return swe.julday(utc_dt.year, utc_dt.month, utc_dt.day,
-                      utc_dt.hour + utc_dt.minute / 60.0)
+                      utc_dt.hour + utc_dt.minute / 60.0 + utc_dt.second / 3600.0)
 
 
 def get_sidereal_longitude(jd: float, planet_id: int) -> float:
@@ -124,7 +125,8 @@ def calculate_vimshottari(moon_lon: float, birth_date: str, birth_time: str) -> 
     starting_lord = NAKSHATRA_LORDS[lord_index]
     starting_years = DASHA_YEARS[starting_lord] * fraction_remaining
 
-    birth_dt = datetime.strptime(f"{birth_date} {birth_time}", "%Y-%m-%d %H:%M")
+    fmt = "%Y-%m-%d %H:%M:%S" if birth_time.count(":") == 2 else "%Y-%m-%d %H:%M"
+    birth_dt = datetime.strptime(f"{birth_date} {birth_time}", fmt)
     now = datetime.now()
 
     dashas = []
@@ -213,6 +215,49 @@ def get_all_positions(date_str: str, time_str: str, tz_offset: float,
     positions["Ketu"] = {
         **parse_longitude(ketu_lon),
         **get_nakshatra_info(ketu_lon)
+    }
+
+    return {
+        "jd": jd,
+        "ayanamsa_lahiri": round(swe.get_ayanamsa(jd), 4),
+        "positions": positions
+    }
+
+
+def get_all_positions_from_jd(jd: float, lat: float, lon: float) -> dict:
+    """Same as get_all_positions() but takes a Julian Day directly, and
+    includes whole-sign house number for each planet/Ascendant."""
+    swe.set_sid_mode(swe.SIDM_LAHIRI)
+
+    positions = {}
+
+    # Ascendant
+    asc_lon = get_ascendant(jd, lat, lon)
+    asc_info = parse_longitude(asc_lon)
+    asc_sign_index = asc_info["sign_index"]
+    positions["Ascendant"] = {
+        **asc_info,
+        **get_nakshatra_info(asc_lon),
+        "house": whole_sign_house(asc_sign_index, asc_sign_index)
+    }
+
+    # Planets
+    for name, pid in PLANET_IDS.items():
+        p_lon = get_sidereal_longitude(jd, pid)
+        p_info = parse_longitude(p_lon)
+        positions[name] = {
+            **p_info,
+            **get_nakshatra_info(p_lon),
+            "house": whole_sign_house(p_info["sign_index"], asc_sign_index)
+        }
+
+    # Ketu = Rahu + 180
+    ketu_lon = (positions["Rahu"]["longitude"] + 180) % 360
+    ketu_info = parse_longitude(ketu_lon)
+    positions["Ketu"] = {
+        **ketu_info,
+        **get_nakshatra_info(ketu_lon),
+        "house": whole_sign_house(ketu_info["sign_index"], asc_sign_index)
     }
 
     return {

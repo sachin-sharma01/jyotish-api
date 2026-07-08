@@ -12,8 +12,9 @@ import os
 # Make sure sibling files are importable
 sys.path.insert(0, os.path.dirname(__file__))
 
-from ephemeris import get_all_positions
+from ephemeris import get_all_positions, get_julian_day
 from rules import derive_facts
+from tithi_pravesh import calculate_tithi_pravesh
 
 
 def validate_input(body: dict) -> str | None:
@@ -26,8 +27,11 @@ def validate_input(body: dict) -> str | None:
     import re
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", str(body["date"])):
         return "date must be in YYYY-MM-DD format"
-    if not re.match(r"^\d{2}:\d{2}$", str(body["time"])):
-        return "time must be in HH:MM format (24hr)"
+    if not re.match(r"^\d{2}:\d{2}(:\d{2})?$", str(body["time"])):
+        return "time must be in HH:MM or HH:MM:SS format (24hr)"
+
+    if body.get("tithi_pravesh") is True and "target_year" not in body:
+        return "target_year is required when tithi_pravesh is true"
 
     return None
 
@@ -87,6 +91,20 @@ class handler(BaseHTTPRequestHandler):
                 },
                 "fact_sheet": facts
             }
+
+            if body.get("tithi_pravesh") is True:
+                natal_jd = get_julian_day(
+                    date_str=str(body["date"]),
+                    time_str=str(body["time"]),
+                    tz_offset=float(body["timezone_offset"])
+                )
+                result["tithi_pravesh"] = calculate_tithi_pravesh(
+                    natal_jd=natal_jd,
+                    target_year=int(body["target_year"]),
+                    birth_lat=float(body["latitude"]),
+                    birth_lon=float(body["longitude"])
+                )
+
             self._respond(200, result)
 
         except Exception as e:
