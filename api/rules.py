@@ -7,148 +7,17 @@ NO language generation here — only facts that go into Claude's prompt.
 
 from ephemeris import (
     SIGNS, DASHA_ORDER, DASHA_YEARS,
-    whole_sign_house, get_d10_sign_index, calculate_vimshottari
+    whole_sign_house, calculate_vimshottari
 )
-
-# ── Jyotish Reference Tables ───────────────────────────────────────────────────
-
-# Sign lords (0-based sign index)
-SIGN_LORDS = {
-    0: "Mars",      # Aries
-    1: "Venus",     # Taurus
-    2: "Mercury",   # Gemini
-    3: "Moon",      # Cancer
-    4: "Sun",       # Leo
-    5: "Mercury",   # Virgo
-    6: "Venus",     # Libra
-    7: "Mars",      # Scorpio
-    8: "Jupiter",   # Sagittarius
-    9: "Saturn",    # Capricorn
-    10: "Saturn",   # Aquarius
-    11: "Jupiter",  # Pisces
-}
-
-# Exaltation signs (0-based)
-EXALTATION = {
-    "Sun": 0,       # Aries
-    "Moon": 1,      # Taurus
-    "Mars": 9,      # Capricorn
-    "Mercury": 5,   # Virgo
-    "Jupiter": 3,   # Cancer ← exalted!
-    "Venus": 11,    # Pisces
-    "Saturn": 6,    # Libra
-    "Rahu": 1,      # Taurus (Parashari)
-    "Ketu": 7,      # Scorpio (Parashari)
-}
-
-# Debilitation signs (0-based)
-DEBILITATION = {
-    "Sun": 6,       # Libra
-    "Moon": 7,      # Scorpio
-    "Mars": 3,      # Cancer
-    "Mercury": 11,  # Pisces
-    "Jupiter": 9,   # Capricorn
-    "Venus": 5,     # Virgo
-    "Saturn": 0,    # Aries
-    "Rahu": 7,      # Scorpio
-    "Ketu": 1,      # Taurus
-}
-
-# Own signs (0-based)
-OWN_SIGNS = {
-    "Sun":     [4],
-    "Moon":    [3],
-    "Mars":    [0, 7],
-    "Mercury": [2, 5],
-    "Jupiter": [8, 11],
-    "Venus":   [1, 6],
-    "Saturn":  [9, 10],
-}
-
-# Moolatrikona signs (0-based)
-MOOLATRIKONA = {
-    "Sun": 4,       # Leo
-    "Moon": 1,      # Taurus (0-20 deg)
-    "Mars": 0,      # Aries
-    "Mercury": 2,   # Gemini
-    "Jupiter": 8,   # Sagittarius
-    "Venus": 6,     # Libra
-    "Saturn": 9,    # Aquarius (actually Aquarius=10, Capricorn=9 — let's use Aquarius)
-}
-
-# Natural benefics / malefics
-NATURAL_BENEFICS = ["Jupiter", "Venus", "Moon", "Mercury"]
-NATURAL_MALEFICS = ["Sun", "Mars", "Saturn", "Rahu", "Ketu"]
-
-# Kendra houses
-KENDRA = [1, 4, 7, 10]
-
-# Trikona houses
-TRIKONA = [1, 5, 9]
-
-# Dusthana houses
-DUSTHANA = [6, 8, 12]
-
-# Upachaya houses
-UPACHAYA = [3, 6, 10, 11]
+from jyotish_fundamentals import (
+    SIGN_LORDS, EXALTATION, DEBILITATION, OWN_SIGNS, MOOLATRIKONA,
+    NATURAL_BENEFICS, NATURAL_MALEFICS, PLANET_ASPECTS,
+    KENDRA, TRIKONA, DUSTHANA, UPACHAYA,
+    get_dignity, get_house_nature, houses_aspected_by, sign_lord,
+)
 
 # Jupiter's aspects (house numbers it aspects from its position)
 JUPITER_ASPECTS = [1, 5, 7, 9]  # 1st (itself), 5th, 7th, 9th
-
-# All planet aspects: {planet: [houses it aspects from its position]}
-PLANET_ASPECTS = {
-    "Sun":     [1, 7],
-    "Moon":    [1, 7],
-    "Mars":    [1, 4, 7, 8],
-    "Mercury": [1, 7],
-    "Jupiter": [1, 5, 7, 9],
-    "Venus":   [1, 7],
-    "Saturn":  [1, 3, 7, 10],
-    "Rahu":    [1, 5, 7, 9],
-    "Ketu":    [1, 5, 7, 9],
-}
-
-# ── Helper Functions ───────────────────────────────────────────────────────────
-
-def get_dignity(planet: str, sign_index: int) -> str:
-    if sign_index == EXALTATION.get(planet):
-        return "exalted"
-    if sign_index == DEBILITATION.get(planet):
-        return "debilitated"
-    if sign_index in OWN_SIGNS.get(planet, []):
-        if sign_index == MOOLATRIKONA.get(planet):
-            return "moolatrikona"
-        return "own_sign"
-    return "neutral"
-
-
-def get_house_nature(house: int) -> list:
-    natures = []
-    if house in KENDRA:
-        natures.append("kendra")
-    if house in TRIKONA:
-        natures.append("trikona")
-    if house in DUSTHANA:
-        natures.append("dusthana")
-    if house in UPACHAYA:
-        natures.append("upachaya")
-    if not natures:
-        natures.append("neutral")
-    return natures
-
-
-def houses_aspected_by(planet: str, planet_house: int) -> list:
-    aspect_offsets = PLANET_ASPECTS.get(planet, [1, 7])
-    aspected = []
-    for offset in aspect_offsets:
-        h = ((planet_house - 1 + offset - 1) % 12) + 1
-        aspected.append(h)
-    return list(set(aspected))
-
-
-def sign_lord(sign_index: int) -> str:
-    return SIGN_LORDS[sign_index % 12]
-
 
 # ── Main Rule Engine ───────────────────────────────────────────────────────────
 
@@ -188,30 +57,6 @@ def derive_facts(positions: dict, birth_date: str, birth_time: str,
             "aspected_houses": aspected_houses,
         }
 
-    # ── D10 Chart ──────────────────────────────────────────────────────────────
-    d10_planets = {}
-    d10_asc_sign = get_d10_sign_index(asc["longitude"])
-
-    for planet, data in positions.items():
-        if planet == "Ascendant":
-            continue
-        d10_sign = get_d10_sign_index(data["longitude"])
-        d10_house = whole_sign_house(d10_sign, d10_asc_sign)
-        d10_dignity = get_dignity(planet, d10_sign)
-        d10_planets[planet] = {
-            "sign": SIGNS[d10_sign],
-            "sign_index": d10_sign,
-            "house": d10_house,
-            "dignity": d10_dignity,
-            "house_nature": get_house_nature(d10_house),
-        }
-
-    d10_asc = {
-        "sign": SIGNS[d10_asc_sign],
-        "sign_index": d10_asc_sign,
-        "sign_lord": sign_lord(d10_asc_sign),
-    }
-
     # ── Dasha ──────────────────────────────────────────────────────────────────
     moon_lon = positions["Moon"]["longitude"]
     dasha = calculate_vimshottari(moon_lon, birth_date, birth_time)
@@ -219,11 +64,9 @@ def derive_facts(positions: dict, birth_date: str, birth_time: str,
     current_md_lord = dasha["current_mahadasha"]["lord"] if dasha["current_mahadasha"] else None
     current_ad_lord = dasha["current_antardasha"]["lord"] if dasha["current_antardasha"] else None
 
-    # Dasha lord placements in D1 and D10
+    # Dasha lord placements in D1
     md_d1 = d1_planets.get(current_md_lord, {})
-    md_d10 = d10_planets.get(current_md_lord, {})
     ad_d1 = d1_planets.get(current_ad_lord, {})
-    ad_d10 = d10_planets.get(current_ad_lord, {})
 
     # ── Jupiter Transit into Cancer ────────────────────────────────────────────
     # Cancer = sign_index 3
@@ -355,6 +198,8 @@ def derive_facts(positions: dict, birth_date: str, birth_time: str,
         "ascendant": {
             "sign": asc["sign"],
             "sign_index": asc_sign_index,
+            "degree": asc["degree"],
+            "minute": asc["minute"],
             "lord": asc_lord,
             "asc_lord_house": d1_planets.get(asc_lord, {}).get("house"),
             "asc_lord_dignity": d1_planets.get(asc_lord, {}).get("dignity"),
@@ -363,10 +208,6 @@ def derive_facts(positions: dict, birth_date: str, birth_time: str,
         "moon_sign": positions["Moon"]["sign"],
         "moon_house": d1_planets["Moon"]["house"],
         "d1_planets": d1_planets,
-        "d10_chart": {
-            "ascendant": d10_asc,
-            "planets": d10_planets
-        },
         "key_house_lords": key_houses,
         "yogas_detected": yogas,
         "dasha": {
@@ -374,10 +215,8 @@ def derive_facts(positions: dict, birth_date: str, birth_time: str,
             "current_antardasha": dasha["current_antardasha"],
             "md_lord_d1_house": md_d1.get("house"),
             "md_lord_d1_dignity": md_d1.get("dignity"),
-            "md_lord_d10_house": md_d10.get("house"),
             "ad_lord_d1_house": ad_d1.get("house"),
             "ad_lord_d1_dignity": ad_d1.get("dignity"),
-            "ad_lord_d10_house": ad_d10.get("house"),
         },
         "jupiter_transit": {
             "entering": "Cancer",

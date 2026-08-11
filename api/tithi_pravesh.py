@@ -18,6 +18,10 @@ import swisseph as swe
 from ephemeris import (
     SIGNS, get_sidereal_longitude, get_all_positions_from_jd
 )
+from jyotish_fundamentals import (
+    NATURAL_MALEFICS, NATURAL_BENEFICS,
+    get_full_dignity, get_house_nature, houses_aspected_by, sign_lord,
+)
 
 # ── Small helpers ────────────────────────────────────────────────────────────
 
@@ -181,11 +185,79 @@ def find_exact_moment(day_start: float, day_end: float, natal_elongation: float)
     raise ValueError("Could not find the exact Tithi Pravesh moment within the Tithi day window")
 
 
+# ── Chart enrichment ─────────────────────────────────────────────────────────
+
+def _aspects_house(planet: str, planet_house: int, target_house: int) -> bool:
+    """Does `planet` (sitting in `planet_house`) aspect `target_house`?"""
+    return target_house in houses_aspected_by(planet, planet_house)
+
+
+def enrich_tp_chart(chart: dict, tp_asc_sign_index: int) -> dict:
+    """Adds dignity/aspected_houses/aspected_rashi/house_nature/influences to
+    each planet in chart['positions'] (Ascendant excluded — not a planet).
+    Returns the house_summary block (occupants/aspecting_malefics/
+    aspecting_benefics for each of the 12 houses)."""
+    positions = chart["positions"]
+    planets = {name: data for name, data in positions.items() if name != "Ascendant"}
+
+    for name, data in planets.items():
+        house = data["house"]
+        aspected_houses = houses_aspected_by(name, house)
+        data["dignity"] = get_full_dignity(name, data["sign_index"])
+        data["aspected_houses"] = aspected_houses
+        data["aspected_rashi"] = [
+            SIGNS[(tp_asc_sign_index + h - 1) % 12] for h in aspected_houses
+        ]
+        data["house_nature"] = get_house_nature(house)
+
+    for name, data in planets.items():
+        house = data["house"]
+        influences = []
+        for other_name, other_data in planets.items():
+            if other_name == name:
+                continue
+            nature = "malefic" if other_name in NATURAL_MALEFICS else "benefic"
+            if other_data["house"] == house:
+                influences.append({"planet": other_name, "relation": "conjunct", "nature": nature})
+            elif _aspects_house(other_name, other_data["house"], house):
+                influences.append({"planet": other_name, "relation": "aspect", "nature": nature})
+        data["influences"] = influences
+
+    house_summary = {}
+    for h in range(1, 13):
+        occupants = [name for name, data in planets.items() if data["house"] == h]
+        aspecting_malefics = []
+        aspecting_benefics = []
+        for name, data in planets.items():
+            if _aspects_house(name, data["house"], h):
+                (aspecting_malefics if name in NATURAL_MALEFICS else aspecting_benefics).append(name)
+        house_summary[str(h)] = {
+            "occupants": occupants,
+            "aspecting_malefics": aspecting_malefics,
+            "aspecting_benefics": aspecting_benefics,
+        }
+
+    return house_summary
+
+
+def build_lagnesh_analysis(tp_positions: dict, tp_asc_sign_index: int, d1_lagnesh: str) -> dict:
+    """Resolves both Lagnesh identities and their TP positions once — 8 of the
+    18 Tithi Pravesh rules depend on this."""
+    tp_lagnesh = sign_lord(tp_asc_sign_index)
+    return {
+        "tp_lagnesh": tp_lagnesh,
+        "tp_lagnesh_position": tp_positions.get(tp_lagnesh),
+        "d1_lagnesh": d1_lagnesh,
+        "d1_lagnesh_tp_position": tp_positions.get(d1_lagnesh) if d1_lagnesh else None,
+    }
+
+
 # ── Orchestration ────────────────────────────────────────────────────────────
 
 TITHI_ELONGATION_TOLERANCE_DEG = 0.05  # ~a few minutes of drift near a Tithi boundary
 
-def calculate_tithi_pravesh(natal_jd: float, target_year: int, birth_lat: float, birth_lon: float) -> dict:
+def calculate_tithi_pravesh(natal_jd: float, target_year: int, birth_lat: float, birth_lon: float,
+                             d1_lagnesh: str = None) -> dict:
     natal_sun_lon = get_sidereal_longitude(natal_jd, swe.SUN)
     natal_moon_lon = get_sidereal_longitude(natal_jd, swe.MOON)
     natal_sun_sign_index = int(natal_sun_lon // 30) % 12
@@ -238,6 +310,10 @@ def calculate_tithi_pravesh(natal_jd: float, target_year: int, birth_lat: float,
     # Step 4: cast at birthplace
     chart = get_all_positions_from_jd(tp_jd, birth_lat, birth_lon)
 
+    tp_asc_sign_index = chart["positions"]["Ascendant"]["sign_index"]
+    house_summary = enrich_tp_chart(chart, tp_asc_sign_index)
+    lagnesh_analysis = build_lagnesh_analysis(chart["positions"], tp_asc_sign_index, d1_lagnesh)
+
     return {
         "target_year": target_year,
         "tithi_pravesh_moment_utc": _jd_to_utc_str(tp_jd),
@@ -249,5 +325,7 @@ def calculate_tithi_pravesh(natal_jd: float, target_year: int, birth_lat: float,
             "longitude": birth_lon,
             "note": "Cast at birthplace coordinates, not current residence"
         },
-        "chart": chart
+        "chart": chart,
+        "house_summary": house_summary,
+        "lagnesh_analysis": lagnesh_analysis
     }

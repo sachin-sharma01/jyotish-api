@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from ephemeris import get_all_positions, get_julian_day
 from rules import derive_facts
 from tithi_pravesh import calculate_tithi_pravesh
+from kundli_chart_svg import generate_north_indian_chart_svg
 
 
 def validate_input(body: dict) -> str | None:
@@ -98,12 +99,39 @@ class handler(BaseHTTPRequestHandler):
                     time_str=str(body["time"]),
                     tz_offset=float(body["timezone_offset"])
                 )
-                result["tithi_pravesh"] = calculate_tithi_pravesh(
+                tp_result = calculate_tithi_pravesh(
                     natal_jd=natal_jd,
                     target_year=int(body["target_year"]),
                     birth_lat=float(body["latitude"]),
-                    birth_lon=float(body["longitude"])
+                    birth_lon=float(body["longitude"]),
+                    d1_lagnesh=facts["ascendant"]["lord"]
                 )
+
+                tp_positions = tp_result["chart"]["positions"]
+                planet_house_map = {
+                    name: pos["house"]
+                    for name, pos in tp_positions.items()
+                    if name != "Ascendant"
+                }
+                planet_nakshatra_map = {
+                    name: pos["nakshatra"]
+                    for name, pos in tp_positions.items()
+                    if name != "Ascendant"
+                }
+                planet_degree_map = {
+                    name: (pos["degree"], pos["minute"])
+                    for name, pos in tp_positions.items()
+                    if name != "Ascendant"
+                }
+                tp_result["chart_svg"] = generate_north_indian_chart_svg(
+                    ascendant_sign_index=tp_positions["Ascendant"]["sign_index"],
+                    planet_house_map=planet_house_map,
+                    planet_nakshatra_map=planet_nakshatra_map,
+                    planet_degree_map=planet_degree_map,
+                    ascendant_degree=(tp_positions["Ascendant"]["degree"], tp_positions["Ascendant"]["minute"])
+                )
+
+                result["tithi_pravesh"] = tp_result
 
             self._respond(200, result)
 

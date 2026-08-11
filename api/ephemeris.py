@@ -96,25 +96,6 @@ def whole_sign_house(planet_sign_index: int, asc_sign_index: int) -> int:
     return ((planet_sign_index - asc_sign_index) % 12) + 1
 
 
-def get_d10_sign_index(natal_longitude: float) -> int:
-    """
-    D10 Dashamsha calculation (Parashari method)
-    Odd signs: count from same sign
-    Even signs: count from 9th sign
-    """
-    sign_index = int(natal_longitude / 30) % 12
-    degree_in_sign = natal_longitude % 30
-    part = int(degree_in_sign / 3)  # 0-9
-
-    # In Jyotish, signs are odd/even by rashi number (Aries=1=odd, Taurus=2=even...)
-    rashi_num = sign_index + 1  # 1-based
-    if rashi_num % 2 == 1:  # Odd rashi
-        d10_sign = (sign_index * 10 + part) % 12
-    else:  # Even rashi
-        d10_sign = (sign_index * 10 + part + 8) % 12
-    return d10_sign
-
-
 def calculate_vimshottari(moon_lon: float, birth_date: str, birth_time: str) -> dict:
     nak_size = 360 / 27
     nak_index = int(moon_lon / nak_size) % 27
