@@ -158,23 +158,74 @@ def generate_north_indian_chart_svg(
     return "".join(parts)
 
 
-def svg_to_png_base64(svg_string: str) -> str:
-    from svglib.svglib import svg2rlg
-    from reportlab.graphics import renderPM
-    import io, base64, re
+CREAM = "#fdf6e3"
 
-    # chart_svg is generated with a responsive width="100%"/height="auto"
-    # (meant for HTML embedding), which svglib can't resolve to a length.
-    # Only the copy fed to svglib is patched here -- the stored chart_svg
-    # string itself is left untouched.
-    match = re.search(r'viewBox="0 0 (\d+(?:\.\d+)?) (\d+(?:\.\d+)?)"', svg_string)
-    width, height = match.group(1), match.group(2)
-    root_tag = re.match(r'<svg[^>]*>', svg_string).group(0)
-    fixed_root_tag = re.sub(r'\s(width|height|style)="[^"]*"', '', root_tag)
-    fixed_root_tag = fixed_root_tag.replace('<svg', f'<svg width="{width}" height="{height}"', 1)
-    fixed_svg_string = svg_string.replace(root_tag, fixed_root_tag, 1)
 
-    drawing = svg2rlg(io.BytesIO(fixed_svg_string.encode('utf-8')))
+def generate_north_indian_chart_png_base64(
+    ascendant_sign_index: int,
+    planet_house_map: dict,
+    size: int = 400
+) -> str:
+    """Same North Indian diamond chart as generate_north_indian_chart_svg(),
+    drawn directly with Pillow instead of SVG — avoids any native
+    compilation dependency (Cairo/FreeType) that Vercel's build image
+    doesn't support. Reuses _house_geometry() so the layout is identical to
+    the SVG version (same polygon points, same anti-clockwise rashi
+    numbering, same house-to-screen-position mapping)."""
+    from PIL import Image, ImageDraw, ImageFont
+    import io, base64
+
+    S = float(size)
+    houses, lines = _house_geometry(S)
+
+    house_planets = {i: [] for i in range(1, 13)}
+    for planet, house_num in planet_house_map.items():
+        abbr = PLANET_ABBR.get(planet)
+        if abbr and house_num in house_planets:
+            house_planets[house_num].append(abbr)
+
+    # Pillow's bundled scalable default font (no system TTF / fontconfig
+    # dependency required, so it's reliable in a minimal serverless image).
+    rashi_font = ImageFont.load_default(size=13)
+    planet_font = ImageFont.load_default(size=14)
+
+    img = Image.new("RGB", (size, size), CREAM)
+    draw = ImageDraw.Draw(img)
+
+    draw.rectangle([0, 0, S - 1, S - 1], outline=GOLD, width=3)
+    draw.line(lines["diag1"], fill=GOLD, width=2)
+    draw.line(lines["diag2"], fill=GOLD, width=2)
+    draw.polygon(lines["diamond"], outline=GOLD, width=2)
+
+    for house_num in range(1, 13):
+        verts, outer = houses[house_num]
+        cx = sum(p[0] for p in verts) / len(verts)
+        cy = sum(p[1] for p in verts) / len(verts)
+
+        # Rashi number: nudged from the house centroid toward its outer
+        # (periphery-facing) vertex, so it sits in a "corner" of the shape —
+        # matches generate_north_indian_chart_svg()'s placement exactly.
+        rx = cx + 0.65 * (outer[0] - cx)
+        ry = cy + 0.65 * (outer[1] - cy)
+
+        sign_num = (ascendant_sign_index + house_num - 1) % 12 + 1
+        draw.text((rx, ry), str(sign_num), font=rashi_font, fill=GOLD, anchor="mm")
+
+        abbrs = house_planets[house_num]
+        if not abbrs:
+            continue
+
+        line_height = 16
+        start_y = cy - (len(abbrs) - 1) * line_height / 2
+        for i, abbr in enumerate(abbrs):
+            py = start_y + i * line_height
+            # stroke_width fakes the SVG version's bold weight since the
+            # bundled default font has no separate bold variant.
+            draw.text(
+                (cx, py), abbr, font=planet_font, fill=NAVY,
+                stroke_width=1, stroke_fill=NAVY, anchor="mm"
+            )
+
     buf = io.BytesIO()
-    renderPM.drawToFile(drawing, buf, fmt='PNG')
-    return base64.b64encode(buf.getvalue()).decode('utf-8')
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
