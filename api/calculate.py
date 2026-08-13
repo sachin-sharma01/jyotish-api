@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from ephemeris import get_all_positions, get_julian_day
 from rules import derive_facts
 from tithi_pravesh import calculate_tithi_pravesh
-from kundli_chart_svg import generate_north_indian_chart_svg
+from kundli_chart_svg import generate_north_indian_chart_svg, svg_to_png_base64
 
 
 def validate_input(body: dict) -> str | None:
@@ -130,6 +130,7 @@ class handler(BaseHTTPRequestHandler):
                     planet_degree_map=planet_degree_map,
                     ascendant_degree=(tp_positions["Ascendant"]["degree"], tp_positions["Ascendant"]["minute"])
                 )
+                tp_result["chart_png_base64"] = svg_to_png_base64(tp_result["chart_svg"])
 
                 result["tithi_pravesh"] = tp_result
 

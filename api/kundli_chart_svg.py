@@ -156,3 +156,25 @@ def generate_north_indian_chart_svg(
 
     parts.append('</svg>')
     return "".join(parts)
+
+
+def svg_to_png_base64(svg_string: str) -> str:
+    from svglib.svglib import svg2rlg
+    from reportlab.graphics import renderPM
+    import io, base64, re
+
+    # chart_svg is generated with a responsive width="100%"/height="auto"
+    # (meant for HTML embedding), which svglib can't resolve to a length.
+    # Only the copy fed to svglib is patched here -- the stored chart_svg
+    # string itself is left untouched.
+    match = re.search(r'viewBox="0 0 (\d+(?:\.\d+)?) (\d+(?:\.\d+)?)"', svg_string)
+    width, height = match.group(1), match.group(2)
+    root_tag = re.match(r'<svg[^>]*>', svg_string).group(0)
+    fixed_root_tag = re.sub(r'\s(width|height|style)="[^"]*"', '', root_tag)
+    fixed_root_tag = fixed_root_tag.replace('<svg', f'<svg width="{width}" height="{height}"', 1)
+    fixed_svg_string = svg_string.replace(root_tag, fixed_root_tag, 1)
+
+    drawing = svg2rlg(io.BytesIO(fixed_svg_string.encode('utf-8')))
+    buf = io.BytesIO()
+    renderPM.drawToFile(drawing, buf, fmt='PNG')
+    return base64.b64encode(buf.getvalue()).decode('utf-8')
