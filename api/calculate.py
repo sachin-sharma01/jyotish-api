@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from ephemeris import get_all_positions, get_julian_day
 from rules import derive_facts
 from tithi_pravesh import calculate_tithi_pravesh
+from yearly_report import build_yearly_2027
 from kundli_chart_svg import generate_north_indian_chart_svg, generate_north_indian_chart_png_base64
 
 
@@ -33,6 +34,10 @@ def validate_input(body: dict) -> str | None:
 
     if body.get("tithi_pravesh") is True and "target_year" not in body:
         return "target_year is required when tithi_pravesh is true"
+
+    if (body.get("yearly_report") is True and body.get("report_year") is not None
+            and str(body.get("report_year")) != "2027"):
+        return "Only report_year 2027 is supported"
 
     return None
 
@@ -85,6 +90,8 @@ class handler(BaseHTTPRequestHandler):
                     "timezone_offset": body["timezone_offset"],
                     "gender": body.get("gender", "unknown"),
                     "married": body.get("married", False),
+                    "relationship_status": body.get("relationship_status"),
+                    "looking_to_marry": bool(body.get("looking_to_marry", False)),
                 },
                 "ayanamsa": {
                     "system": "Lahiri",
@@ -137,6 +144,10 @@ class handler(BaseHTTPRequestHandler):
                 )
 
                 result["tithi_pravesh"] = tp_result
+
+            if body.get("yearly_report") is True:
+                result["yearly_2027"] = build_yearly_2027(raw["positions"], facts,
+                                                          str(body["date"]), str(body["time"]))
 
             self._respond(200, result)
 

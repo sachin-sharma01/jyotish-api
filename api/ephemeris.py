@@ -96,6 +96,78 @@ def whole_sign_house(planet_sign_index: int, asc_sign_index: int) -> int:
     return ((planet_sign_index - asc_sign_index) % 12) + 1
 
 
+def _parse_birth_dt(birth_date: str, birth_time: str) -> datetime:
+    fmt = "%Y-%m-%d %H:%M:%S" if birth_time.count(":") == 2 else "%Y-%m-%d %H:%M"
+    return datetime.strptime(f"{birth_date} {birth_time}", fmt)
+
+
+def _md_periods(moon_lon: float, birth_dt: datetime) -> list:
+    """9 Mahadashas (one full cycle) anchored at the first MD's true start."""
+    nak_size = 360 / 27
+    first_lord = NAKSHATRA_LORDS[(int(moon_lon / nak_size) % 27) % 9]
+    fraction_elapsed = (moon_lon % nak_size) / nak_size
+    start = birth_dt - timedelta(days=DASHA_YEARS[first_lord] * fraction_elapsed * 365.25)
+    idx = DASHA_ORDER.index(first_lord)
+    out = []
+    for i in range(9):
+        lord = DASHA_ORDER[(idx + i) % 9]
+        years = DASHA_YEARS[lord]
+        end = start + timedelta(days=years * 365.25)
+        out.append({"level": "MD", "lord": lord, "start": start, "end": end,
+                    "years": years, "md_lord": lord, "ad_lord": None})
+        start = end
+    return out
+
+
+def _subdivide(parent: dict, level: str) -> list:
+    """Split a period into 9 full-length children starting from the parent lord."""
+    idx = DASHA_ORDER.index(parent["lord"])
+    start = parent["start"]
+    out = []
+    for i in range(9):
+        lord = DASHA_ORDER[(idx + i) % 9]
+        years = parent["years"] * DASHA_YEARS[lord] / 120
+        end = start + timedelta(days=years * 365.25)
+        out.append({
+            "level": level, "lord": lord, "start": start, "end": end, "years": years,
+            "md_lord": parent["md_lord"],
+            "ad_lord": lord if level == "AD" else parent["ad_lord"],
+        })
+        start = end
+    return out
+
+
+def vimshottari_tree(moon_lon: float, birth_date: str, birth_time: str,
+                     range_start: datetime, range_end: datetime) -> list:
+    """Return every MD/AD/PD period overlapping [range_start, range_end).
+    Each item: {"level": "MD"|"AD"|"PD", "lord", "start", "end",
+                "md_lord", "ad_lord"}  (start/end as datetime).
+    Uses full-length subdivision anchored at each period's true start.
+    Sub-period lengths: child_years = parent_years * DASHA_YEARS[child] / 120,
+    children start from the parent lord and follow DASHA_ORDER."""
+    birth_dt = _parse_birth_dt(birth_date, birth_time)
+
+    def overlaps(p):
+        return p["start"] < range_end and p["end"] > range_start
+
+    def strip(p):
+        return {k: p[k] for k in ("level", "lord", "start", "end", "md_lord", "ad_lord")}
+
+    out = []
+    for md in _md_periods(moon_lon, birth_dt):
+        if not overlaps(md):
+            continue
+        out.append(strip(md))
+        for ad in _subdivide(md, "AD"):
+            if not overlaps(ad):
+                continue
+            out.append(strip(ad))
+            for pd in _subdivide(ad, "PD"):
+                if overlaps(pd):
+                    out.append(strip(pd))
+    return out
+
+
 def calculate_vimshottari(moon_lon: float, birth_date: str, birth_time: str) -> dict:
     nak_size = 360 / 27
     nak_index = int(moon_lon / nak_size) % 27
@@ -142,24 +214,21 @@ def calculate_vimshottari(moon_lon: float, birth_date: str, birth_time: str) -> 
                        if datetime.strptime(d["start"], "%Y-%m-%d") <= now
                        <= datetime.strptime(d["end"], "%Y-%m-%d")), None)
 
-    # Find current antardasha
+    # Find current antardasha (full-length subdivision from the MD's true start)
     current_ad = None
     if current_md:
-        md_start = datetime.strptime(current_md["start"], "%Y-%m-%d")
-        md_lord_idx = DASHA_ORDER.index(current_md["lord"])
-        ad_dt = md_start
-        for i in range(9):
-            ad_lord = DASHA_ORDER[(md_lord_idx + i) % 9]
-            ad_years = (DASHA_YEARS[ad_lord] / 120) * current_md["years"]
-            ad_end = ad_dt + timedelta(days=ad_years * 365.25)
-            if ad_dt <= now <= ad_end:
-                current_ad = {
-                    "lord": ad_lord,
-                    "start": ad_dt.strftime("%Y-%m-%d"),
-                    "end": ad_end.strftime("%Y-%m-%d")
-                }
-                break
-            ad_dt = ad_end
+        for md in _md_periods(moon_lon, birth_dt):
+            if md["lord"] != current_md["lord"] or not (md["start"] <= now <= md["end"]):
+                continue
+            for ad in _subdivide(md, "AD"):
+                if ad["start"] <= now <= ad["end"]:
+                    current_ad = {
+                        "lord": ad["lord"],
+                        "start": ad["start"].strftime("%Y-%m-%d"),
+                        "end": ad["end"].strftime("%Y-%m-%d")
+                    }
+                    break
+            break
 
     return {
         "sequence": dashas,
