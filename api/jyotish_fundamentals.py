@@ -68,7 +68,7 @@ MOOLATRIKONA = {
     "Mercury": 2,   # Gemini
     "Jupiter": 8,   # Sagittarius
     "Venus": 6,     # Libra
-    "Saturn": 9,    # Aquarius (actually Aquarius=10, Capricorn=9 — let's use Aquarius)
+    "Saturn": 10,    # Aquarius (actually Aquarius=10, Capricorn=9 — let's use Aquarius)
 }
 
 # Natural benefics / malefics
