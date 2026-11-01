@@ -154,9 +154,28 @@ for w, (h, f, to) in zip(dt, exp_dt):
 m = y["monthly"]
 assert len(m) == 12 and m[0]["month"] == "January 2027" and m[11]["month"] == "December 2027"
 lucky = [(x["lucky"]["planet"], x["lucky"]["color"], x["lucky"]["numbers"]) for x in m]
-assert lucky[0] == ("Jupiter", "Yellow", [3, 5])
-assert all(l == ("Saturn", "Navy Blue", [8, 5]) for l in lucky[1:6]), lucky
-assert all(l == ("Venus", "Pink / Cream", [6, 5]) for l in lucky[6:]), lucky
+good = y["lucky_planets"]
+assert good == ["Mercury", "Venus", "Saturn", "Jupiter"], good          # Virgo Lagna: 1, 9, 5, 4 lords
+assert all(l[0] in good for l in lucky), lucky
+assert all(a[0] != b[0] for a, b in zip(lucky, lucky[1:])), lucky       # never same planet two months running
+assert len({l[0] for l in lucky}) >= 3, lucky                           # real variety across the year
+assert all(len(set(l[2])) == 2 for l in lucky), lucky
+assert not set.intersection(*[set(l[2]) for l in lucky]), lucky         # no number fixed all year
+assert all(x["lucky"]["day"] for x in m)
+
+# Life dasha (MD sequence + 15y AD windows, no PD)
+ld = y["life_dasha"]
+mds = ld["mahadasha_sequence"]
+assert mds[0]["start"] == CLIENT["date"], mds[0]                       # first MD clipped to birth
+assert [p["lord"] for p in mds][:5] == ["Venus", "Sun", "Moon", "Mars", "Rahu"], mds
+assert all(a["end"] == b["start"] for a, b in zip(mds, mds[1:])), mds
+jup = next(p for p in mds if p["lord"] == "Jupiter")
+assert "rules 7th house" in jup["links"]["relationship"], jup              # Pisces 7th for Virgo
+ads = ld["antardasha_windows_15y"]
+assert ads and all(set(a) == {"md_lord", "ad_lord", "start", "end", "links"} for a in ads)
+assert ads[0]["ad_lord"] == "Mercury" and ads[1]["ad_lord"] == "Ketu", ads[:2]
+venus_ad = next(a for a in ads if a["ad_lord"] == "Venus")
+assert "natural significator (relationship)" in venus_ad["links"]["relationship"]
 assert m[2]["mars_debilitated"] and near(m[2]["mars_debilitated"][0]["from"], "2027-03-10")
 assert m[0]["mars_retrograde"] and near(m[0]["mars_retrograde"][0]["from"], "2027-01-10")
 assert all(e["planet"] != "Sun" or e["type"] != "ingress" for x in m for e in x["slow_events"])
@@ -176,7 +195,8 @@ code, full = call_handler({**CLIENT, "yearly_report": True,
 assert code == 200 and "yearly_2027" in full
 assert full["client"]["relationship_status"] == "single" and full["client"]["looking_to_marry"] is True
 assert set(full["yearly_2027"]) == {"year", "natal_summary", "dasha_2027", "transits_2027",
-                                    "sade_sati_phases", "double_transit_windows", "monthly"}
+                                    "sade_sati_phases", "double_transit_windows", "monthly",
+                                    "life_dasha", "lucky_planets"}
 print("Part 3 (handler + regression) OK")
 
 size_kb = len(json.dumps(full["yearly_2027"]).encode()) / 1024
