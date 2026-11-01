@@ -33,7 +33,6 @@ LUCKY_TABLE = {
     "Saturn":  ("Navy Blue", 8),
     "Mars":    ("Red", 9),
 }
-LUCKY_HOUSES = {1, 4, 5, 7, 9, 10}
 
 SADE_SATI_PHASES = {
     12: "Sade Sati — rising phase",
@@ -215,31 +214,44 @@ def _double_transit(ctx: _Ctx) -> list:
     return out
 
 
-def lucky_for_month(month: int, pd_items, asc_sign_index: int, lagnesh: str) -> dict:
-    """Lucky planet/color/numbers for a month. Self-contained for later tuning.
-    pd_items: PD tree items (start/end as datetime)."""
-    probe = datetime(YEAR, month, 15, 12, 0)
-    pd_lord = next((p["lord"] for p in pd_items if p["start"] <= probe < p["end"]), None)
+WEEKDAY = {"Sun": "Sunday", "Moon": "Monday", "Mars": "Tuesday", "Mercury": "Wednesday",
+           "Jupiter": "Thursday", "Venus": "Friday", "Saturn": "Saturday"}
 
-    def ruled(planet):
-        return {h for h in range(1, 13)
-                if sign_lord((asc_sign_index + h - 1) % 12) == planet}
 
-    if pd_lord and ruled(pd_lord) & LUCKY_HOUSES:
-        planet = pd_lord
-    else:
-        planet = sign_lord((asc_sign_index + 8) % 12)  # 9th lord
+def lucky_planets(asc_sign_index: int) -> list:
+    """Planets that are good for this Lagna, in priority order:
+    lords of 1, 9, 5, 10, 4 (yogakaraka naturally appears via 4/5 or 9/10)."""
+    out = []
+    for h in (1, 9, 5, 10, 4):
+        lord = sign_lord((asc_sign_index + h - 1) % 12)
+        if lord not in out:
+            out.append(lord)
+    return out
 
+
+def lucky_for_month(month: int, asc_sign_index: int, prev_planet=None) -> dict:
+    """Lucky planet/colour/numbers/day for a month. No dasha dependency.
+    Month planet = lord of the Sun's sign on the 15th if it is good for the Lagna,
+    otherwise rotate through the good planets. Never the same planet two months running.
+    Second number comes from a different good planet, so no number is fixed all year."""
+    good = lucky_planets(asc_sign_index)
+    sun_sign = _sign_of(dict((ds, lon) for ds, lon, _ in DAILY["Sun"])[f"{YEAR}-{month:02d}-15"])
+    sun_lord = sign_lord(sun_sign)
+    planet = sun_lord if sun_lord in good else good[(month - 1) % len(good)]
+    if planet == prev_planet:
+        planet = good[(good.index(planet) + 1) % len(good)]
     color, n1 = LUCKY_TABLE[planet]
-    n2 = LUCKY_TABLE[lagnesh][1]
+    second = good[(good.index(planet) + month) % len(good)]
+    if second == planet:
+        second = good[(good.index(planet) + 1) % len(good)]
+    n2 = LUCKY_TABLE[second][1]
     if n2 == n1:
         n2 = n1 + 9
-    return {"planet": planet, "color": color, "numbers": [n1, n2]}
+    return {"planet": planet, "color": color, "numbers": [n1, n2], "day": WEEKDAY[planet]}
 
 
 def _monthly(ctx: _Ctx, tree: list) -> list:
-    lagnesh = ctx.facts["ascendant"]["lord"]
-    pd_items = [p for p in tree if p["level"] == "PD"]
+    prev_lucky = None
     segs = {p: _sign_segments(p) for p in ("Sun", "Mars")}
     daily_sign = {p: {ds: _sign_of(lon) for ds, lon, _ in DAILY[p]}
                   for p in ("Sun", "Mars", "Saturn", "Rahu")}
@@ -276,9 +288,54 @@ def _monthly(ctx: _Ctx, tree: list) -> list:
                     for p in tree if p["level"] == level
                     and p["start"] < me_dt and p["end"] > ms_dt]
         item["dasha"] = {"antardasha": overlapping("AD"), "pratyantardasha": overlapping("PD")}
-        item["lucky"] = lucky_for_month(m, pd_items, ctx.asc, lagnesh)
+        item["lucky"] = lucky_for_month(m, ctx.asc, prev_lucky)
+        prev_lucky = item["lucky"]["planet"]
         out.append(item)
     return out
+
+
+LINK_HOUSES = {"relationship": [7], "career": [10], "wealth": [2, 11]}
+KARAKA = {"relationship": "Venus", "career": "Sun", "wealth": "Jupiter"}
+
+
+def _links(ctx: _Ctx, planet: str) -> dict:
+    """Why a dasha lord is tied to relationships / career / wealth in the natal chart."""
+    info = ctx.lord_info(planet)
+    nh = info["natal_house"]
+    asp = set(houses_aspected_by(planet, nh)) if nh else set()
+    out = {}
+    for topic, houses in LINK_HOUSES.items():
+        why = []
+        for h in houses:
+            if h in info["houses_ruled"]:
+                why.append(f"rules {h}th house")
+            if nh == h:
+                why.append(f"sits in {h}th house")
+            if h in asp:
+                why.append(f"aspects {h}th house")
+        if planet == KARAKA[topic]:
+            why.append(f"natural significator ({topic})")
+        out[topic] = why
+    return out
+
+
+def _life_dasha(ctx: _Ctx, raw_positions: dict, birth_date: str, birth_time: str) -> dict:
+    """Mahadasha sequence for the whole life + Antardasha windows 2027-2041 (MD/AD only)."""
+    moon = raw_positions["Moon"]["longitude"]
+    by = int(birth_date[:4])
+    life = vimshottari_tree(moon, birth_date, birth_time,
+                            datetime(by, 1, 1), datetime(by + 100, 1, 1))
+    born = datetime.fromisoformat(f"{birth_date}T{birth_time}")
+    mds = [{"lord": p["lord"], "start": _fmt(max(p["start"], born)), "end": _fmt(p["end"]),
+            "lord_info": ctx.lord_info(p["lord"]), "links": _links(ctx, p["lord"])}
+           for p in life if p["level"] == "MD"]
+    win = vimshottari_tree(moon, birth_date, birth_time,
+                           datetime(YEAR, 1, 1), datetime(YEAR + 15, 1, 1))
+    ads = [{"md_lord": p["md_lord"], "ad_lord": p["lord"],
+            "start": _fmt(p["start"]), "end": _fmt(p["end"]),
+            "links": _links(ctx, p["lord"])}
+           for p in win if p["level"] == "AD"]
+    return {"mahadasha_sequence": mds, "antardasha_windows_15y": ads}
 
 
 # ── Public entry point ──────────────────────────────────────────────────────
@@ -303,4 +360,6 @@ def build_yearly_2027(raw_positions: dict, facts: dict, birth_date: str,
         "sade_sati_phases": _sade_sati(ctx),
         "double_transit_windows": _double_transit(ctx),
         "monthly": _monthly(ctx, tree),
+        "life_dasha": _life_dasha(ctx, raw_positions, birth_date, birth_time),
+        "lucky_planets": lucky_planets(asc),
     }
